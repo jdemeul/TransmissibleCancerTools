@@ -55,6 +55,7 @@ mincontiglength <- 1e6
 
 allowed_contigs <- devilinfo[devilinfo$width >= 1e6, "contig"]
 has_good_depth <- baflogr$h_ref + baflogr$h_alt >= mincounts
+
 # on_sel_chrom <- dft2_dna$chr == "Chr4"
 
 baflogr <- baflogr[has_good_depth & baflogr$Scaffold %in% allowed_contigs, ]
@@ -74,7 +75,9 @@ rm(totalhost,totaltum)
 
 baflogr$ntot <- ((2*(1-rho) + rho*psit)*2^baflogr$logr - 2*(1-rho))/rho
 
-p1 <- ggplot(data = baflogr, mapping = aes(x = cumpos, y = ntot)) + geom_point(shape = ".", alpha = .2) + facet_wrap(~chr) + ylim(c(-.2, 6))
+# p1 <- ggplot(data = baflogr[sample(x = 1:nrow(baflogr), size = 1e6, replace = F), ], mapping = aes(x = cumpos, y = ntot)) + geom_point(shape = ".", alpha = .2) + facet_wrap(~chr) + ylim(c(-.2, 6))
+p1 <- ggplot(data = baflogr[baflogr$chr == "1", ], mapping = aes(x = cumpos, y = ntot)) + geom_point(shape = ".", alpha = .2) + facet_wrap(~chr) + ylim(c(-.2, 6))
+# p1 <- ggplot(data = baflogr, mapping = aes(x = cumpos, y = ntot)) + geom_point(shape = ".", alpha = .2) + facet_wrap(~chr) + ylim(c(-.2, 6))
 p1
 
 
@@ -119,11 +122,14 @@ baflogr$ntotsm <- unlist(by(data = baflogr$ntot, INDICES = baflogr$chr, FUN = fu
 
 # checking
 # testdf <- baflogr[sample(x = 1:nrow(baflogr), size = 100000, replace = F), ]
-p1 <- ggplot(data = baflogr[baflogr$chr != "Chrx",], mapping = aes(x = cumpos)) + geom_point(shape = ".", alpha = .2, mapping = aes(y = ntot), colour = "goldenrod2")
+p1 <- ggplot(data = baflogr[baflogr$chr == "19",], mapping = aes(x = cumpos)) + geom_point(shape = ".", alpha = 1, mapping = aes(y = ntot), colour = "goldenrod2")
+# p1 <- ggplot(data = baflogr[baflogr$chr != "Chrx",], mapping = aes(x = cumpos)) + geom_point(shape = ".", alpha = .2, mapping = aes(y = ntot), colour = "goldenrod2")
 p1 <- p1 + geom_point(shape = ".", alpha = .2, mapping = aes(y = nmin), colour = "darkslategrey") + geom_point(mapping = aes(y = nminsm), colour = "red", alpha = .5, shape = ".")
 p1 <- p1 + geom_point(mapping = aes(y = ntotsm), colour = "black", alpha = .5, shape = ".")
-p1 <- p1 + facet_wrap(~chr)
+# p1 <- p1 + facet_wrap(~chr)
 p1 <- p1+ylim(c(-.2, 6))
+# p1 <- p1 + xlim(c(7.25e7,7.5e7))
+# p1 <- p1+ylim(c(0, 1))
 p1
 
 # ggsave(filename = "/srv/shared/vanloo/home/jdemeul/projects/2018_Murchison/results/20180426_CN-transformed_BAFLogR.png", plot = p1, width = 16, height = 6)
@@ -131,10 +137,10 @@ p1
 # plot(1:length(cnsegs$Chr2$yhat), cnsegs$Chr2$yhat)
 
 # p1 <- ggplot(data = baflogr, mapping = aes(x = ntotsm, fill = htgeno)) + geom_histogram(binwidth = .01)
-p1 <- ggplot(data = baflogr, mapping = aes(x = ntot, fill = htgeno)) + geom_histogram(binwidth = .01)
+p1 <- ggplot(data = baflogr[baflogr$chr == "5",], mapping = aes(x = nmin, fill = htgeno)) + geom_histogram(binwidth = .01)
 p1 <- p1 + geom_vline(xintercept = .1)
-p1 <- p1 + facet_wrap(~chr)
-p1 <- p1 + xlim(c(-.2, 3))
+# p1 <- p1 + facet_wrap(~chr)
+p1 <- p1 + xlim(c(-.2, 5))
 p1
 
 
@@ -169,7 +175,8 @@ segends2 <- which(!c(nminzerosegs, F) & c(F, nminzerosegs))
 ### selecting SNPs to run on:
 # get all hetloci (nmin ≥ 1) which are het in host as well (so htgeno = AB/*)
 hetidxs <- which(baflogr$htgeno == "AB/*")
-nminoneidxs <- which(baflogr$nmin >= (nminonepeak + nminzeropeak)/2)
+# nminoneidxs <- which(baflogr$nmin >= (.75*nminonepeak + .25*nminzeropeak)/2)
+nminoneidxs <- which(baflogr$nmin >= (.66*nminonepeak + .33*nminzeropeak))
 cnoneidxs <- unlist(mapply(segstarts, segends, FUN = ':'))
 nminzeroidxs <- unlist(mapply(segstarts2, segends2, FUN = ':'))
 hostAAidxs <- which(baflogr$htgeno == 'AA/B*')
@@ -185,11 +192,14 @@ baflogr[intersect(hostBBidxs, nminoneidxs), "type"] <- 'BB/AB'
 
 # finalbaflogr <- baflogr[finalidxs, ]
 
-p1 <- ggplot(data = baflogr[baflogr$type %in% c("AB/AB", "AB/A") & baflogr$chr != "Chrx", ], mapping = aes(x = cumpos)) + geom_point(shape = ".", alpha = .2, mapping = aes(y = baf), colour = "goldenrod2")
+# p1 <- ggplot(data = baflogr[baflogr$type %in% c("AB/AB", "AB/A") & baflogr$chr != "Chrx", ], mapping = aes(x = cumpos)) + geom_point(shape = ".", alpha = .2, mapping = aes(y = baf), colour = "goldenrod2")
+p1 <- ggplot(data = baflogr[baflogr$type %in% c("AB/AB", "AB/A") & baflogr$chr != "X", ], mapping = aes(x = cumpos)) + geom_point(shape = ".", alpha = .2, mapping = aes(y = baf), colour = "goldenrod2")
 p1 <- p1 + facet_wrap(~chr)
 # p1 <- p1+ylim(c(-.2, 6))
 p1
 # ggsave(filename = "/srv/shared/vanloo/home/jdemeul/projects/2018_Murchison/results/20180426_input_BAF_first_ASCAT_run.png", plot = p1, width = 16, height = 6)
 
 
-write.table(x = baflogr, file = "/srv/shared/vanloo/home/jdemeul/projects/2018_Murchison/results/20180425_selectedSNPs_counts.txt", quote = F, sep = "\t")
+# write.table(x = baflogr, file = "/srv/shared/vanloo/home/jdemeul/projects/2018_Murchison/results/20180425_selectedSNPs_counts.txt", quote = F, sep = "\t")
+write_tsv(x = baflogr, path = "/srv/shared/vanloo/home/jdemeul/projects/2018_Murchison/results/20180508_selectedSNPs_counts.txt", col_names = T)
+# write.table(x = baflogr, file = "/srv/shared/vanloo/home/jdemeul/projects/2018_Murchison/results/20180508_selectedSNPs_counts.txt", quote = F, sep = "\t", row.names = F)
