@@ -69,4 +69,17 @@ baflogr <- genotype_loci_2ndpass(baflogr = baflogr, sampleid = "Fibro_DFT2_50-50
                                   plotting = T)
 
 
+setwd("/srv/shared/vanloo/home/jdemeul/projects/2018_Murchison/results/Fibro_DFT2_50-50MIX/ascatrun1")
+ascat.output <- ascat_run1(baflogr = baflogr)
+
+setwd("/srv/shared/vanloo/home/jdemeul/projects/2018_Murchison/results/")
+# redo na, nb, ntot calculations using latest ASCAT rho/psi and get final genotypes/input
+# debug(genotype_loci_finalpass)
+baflogr <- genotype_loci_finalpass(baflogr = baflogr, sampleid = "Fibro_DFT2_50-50MIX",
+                                   lohseg_minlength = 1e5,
+                                   ascatoutput = ascat.output,
+                                   plotting = T)
+
+setwd("/srv/shared/vanloo/home/jdemeul/projects/2018_Murchison/results/Fibro_DFT2_50-50MIX/ascatrun2")
+ascat.output <- ascat_run2(baflogr = baflogr, ascatoutput1 = ascat.output)
 

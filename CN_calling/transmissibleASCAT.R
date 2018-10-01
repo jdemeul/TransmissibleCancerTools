@@ -3,7 +3,7 @@
 
 get_devil_genome <- function(devilinfofile) {
   devilinfo <- readr::read_tsv(file = devilinfo_file, col_names = c("contig", "width"), col_types = "ci")
-  devilinfo$chr <- tolower(substr(x = devilinfo$contig, start = 1, stop = 4))
+  devilinfo$chr <- toupper(substr(x = devilinfo$contig, start = 4, stop = 4))
   devilinfo$start <- unlist(by(data = as.numeric(devilinfo$width), INDICES = devilinfo$chr, FUN = function(x) cumsum(c(1,x))[-length(x)]))
   devilinfo$end <- unlist(by(data = as.numeric(devilinfo$width), INDICES = devilinfo$chr, FUN = cumsum))
   devilinfo_gr <- GRanges(seqnames = devilinfo$chr, ranges = IRanges(start = devilinfo$start, end = devilinfo$end), contig = devilinfo$contig)
@@ -19,7 +19,7 @@ get_baf_logr <- function(tumour_allelecounts_file, host_allelecounts_file, refer
   host_allelecounts <- readr::read_tsv(file = host_allelecounts_file, col_names = c("scaffold", "pos", paste0("count_", c("A", "C", "G", "T"))), col_types = "ciiiii-", skip = 1)
   
   baflogr <- reference_alleles
-  baflogr$chr <- tolower(substr(baflogr$scaffold, 1, 4))
+  baflogr$chr <- toupper(substr(baflogr$scaffold, 4, 4))
   baflogr$cumpos <- start(genomeinfo[match(x = baflogr$scaffold, table = mcols(genomeinfo)$contig)]) + baflogr$pos
   baflogr$h_ref <- ifelse(reference_alleles$ref == "A", host_allelecounts$count_A,
                           ifelse(reference_alleles$ref == "C", host_allelecounts$count_C, 
@@ -183,30 +183,162 @@ genotype_loci_2ndpass <- function(baflogr, sampleid,
   nminoneidxs <- which(baflogr$nmin >= (.66*nminonepeak + .33*nminzeropeak))
   cnoneidxs <- unlist(mapply(segstarts, segends, FUN = ':'))
   nminzeroidxs <- unlist(mapply(segstarts2, segends2, FUN = ':'))
-  hostAAidxs <- which(baflogr$htgeno %in% c('AA/B*', 'AA/*'))
-  hostBBidxs <- which(baflogr$htgeno %in% c('BB/A*', 'BB/*'))
+  # hostAAidxs <- which(baflogr$htgeno %in% c('AA/B*', 'AA/*'))
+  # hostBBidxs <- which(baflogr$htgeno %in% c('BB/A*', 'BB/*'))
   
   # finalidxs <- intersect(hetidxs, c(nminoneidxs, cnoneidxs, nminzeroidxs))
   
   baflogr$type <- NA
-  baflogr[intersect(hetidxs, nminoneidxs), "type"] <- "AB/AB"
   baflogr[intersect(hetidxs, c(cnoneidxs, nminzeroidxs)), "type"] <- 'AB/A'
-  baflogr[intersect(hostAAidxs, nminoneidxs), "type"] <- 'AA/AB'
-  baflogr[intersect(hostBBidxs, nminoneidxs), "type"] <- 'BB/AB'
+  baflogr[intersect(hetidxs, nminoneidxs), "type"] <- "AB/AB"
+  # baflogr[intersect(hostAAidxs, nminoneidxs), "type"] <- 'AA/AB'
+  # baflogr[intersect(hostBBidxs, nminoneidxs), "type"] <- 'BB/AB'
   
   # finalbaflogr <- baflogr[finalidxs, ]
   if (plotting) {
     # p1 <- ggplot(data = baflogr[baflogr$type %in% c("AB/AB", "AB/A") & baflogr$chr != "Chrx", ], mapping = aes(x = cumpos)) + geom_point(shape = ".", alpha = .2, mapping = aes(y = baf), colour = "goldenrod2")
     p1 <- ggplot(data = baflogr[baflogr$type %in% c("AB/AB", "AB/A") & baflogr$chr != "X", ], mapping = aes(x = cumpos))
     p1 <- p1 + geom_point(shape = ".", alpha = .2, mapping = aes(y = baf), colour = "goldenrod2")
-    p1 <- p1 + facet_wrap(~chr)
+    p1 <- p1 + facet_wrap(~chr) + theme_minimal()
     # p1 <- p1+ylim(c(-.2, 6))
     ggsave(filename = paste0(sampleid, "_BAFinputToASCATrun1.png"), plot = p1)
     # ggsave(filename = "/srv/shared/vanloo/home/jdemeul/projects/2018_Murchison/results/20180426_input_BAF_first_ASCAT_run.png", plot = p1, width = 16, height = 6)
   }
+  
+  # write_tsv(x = baflogr, path = paste0(sampleid, "_genotyped_BAF-Logr_all.txt"), col_names = T)
+  
+  return(baflogr)
+}
+
+
+
+genotype_loci_finalpass <- function(baflogr, sampleid,
+                                    lohseg_minlength = 1e5,
+                                    ascatoutput,
+                                    plotting = T) {
+  
+  # str(ascat.output)
+  psit <- ascatoutput$psi
+  rho <- ascatoutput$aberrantcellfraction
+  
+  # recompute na, nb, ntot with ascat rho/psi
+  baflogr$na <- ifelse(baflogr$htgeno == "AB/*", ((2*(1-rho) + rho*psit)*(1-baflogr$baf)*2^baflogr$logr - (1-rho))/rho, # single copy of A in host
+                       ifelse(baflogr$htgeno %in% c("AA/B*", "AA/*"), ((2*(1-rho) + rho*psit)*(1-baflogr$baf)*2^baflogr$logr - 2*(1-rho))/rho, # two copies of A in host
+                              ifelse(baflogr$htgeno %in% c("BB/A*", "BB/*"), ((2*(1-rho) + rho*psit)*(1-baflogr$baf)*2^baflogr$logr)/rho, NA))) # 0 copies of A in host
+  
+  # same for the B allele
+  baflogr$nb <- ifelse(baflogr$htgeno == "AB/*", ((2*(1-rho) + rho*psit)*baflogr$baf*2^baflogr$logr - (1-rho))/rho, # single copy of B in host
+                       ifelse(baflogr$htgeno %in% c("AA/B*", "AA/*"), ((2*(1-rho) + rho*psit)*baflogr$baf*2^baflogr$logr)/rho, # 0 copies of B in host
+                              ifelse(baflogr$htgeno %in% c("BB/A*", "BB/*"), ((2*(1-rho) + rho*psit)*baflogr$baf*2^baflogr$logr - 2*(1-rho))/rho, NA))) # two copies of B in host
+  
+  # get CN minor allele
+  baflogr$nmin <- ifelse(baflogr$na < baflogr$nb, baflogr$na, baflogr$nb)
+  # and total
+  baflogr$ntot <- (psit*2^baflogr$logr-2*(1-rho))/rho
+  
+  # get LOH segments from ASCAT
+  ascat_lohsegs <- ascatoutput$segments[ascatoutput$segments$nMinor == 0, ]
+  # ascat_lohsegs$chr <- toupper(sub(pattern = "chr", replacement = "", x = ascat_lohsegs$chr))
+  
+  # plotting for quick check
+  if (plotting) {
+    p1 <- ggplot(data = baflogr, mapping = aes(x = cumpos)) + geom_point(shape = ".", alpha = .2, mapping = aes(y = ntot), colour = "goldenrod2")
+    p1 <- p1 + geom_point(shape = ".", alpha = .2, mapping = aes(y = nmin), colour = "darkslategrey")
+    p1 <- p1 + geom_segment(data = ascat_lohsegs, mapping = aes(x = startpos, xend = endpos, y = nMajor, yend = nMajor), colour = "red", size = 5, alpha = .75)
+    p1 <- p1 + ylim(c(-.2, 6)) + theme_minimal() + facet_wrap(~chr)
+    ggsave(filename = paste0(sampleid, "_identifiedLOHsegments_ascatrun1.png"), plot = p1)
+  }
+  
+  # create lohseg granges
+  ascat_lohsegs_gr <- GRanges(seqnames = ascat_lohsegs$chr, ranges = IRanges(start = ascat_lohsegs$startpos, end = ascat_lohsegs$endpos))
+  ascat_lohsegs_gr <- ascat_lohsegs_gr[width(ascat_lohsegs_gr) >= lohseg_minlength]
+  
+  # create baflogr granges and overlap with LOH segments
+  baflogr_gr <- GRanges(seqnames = baflogr$chr, ranges = IRanges(start = baflogr$cumpos, end = baflogr$cumpos))
+  lohidxs <- which(baflogr_gr %over% ascat_lohsegs_gr)
+  
+  
+  # reset typing
+  baflogr$type <- NA
+
+  # get all hetloci (nmin ≥ 1) which are het in host as well (so htgeno = AB/*)
+  hetidxs <- which(baflogr$htgeno == "AB/*")
+  nminoneidxs <- which(baflogr$nmin >= .66)
+  hostAAidxs <- which(baflogr$htgeno %in% c('AA/B*', 'AA/*'))
+  hostBBidxs <- which(baflogr$htgeno %in% c('BB/A*', 'BB/*'))
+  
+  baflogr[intersect(hetidxs, lohidxs), "type"] <- 'AB/A'
+  baflogr[intersect(hetidxs, nminoneidxs), "type"] <- "AB/AB"
+  baflogr[intersect(hostAAidxs, nminoneidxs), "type"] <- 'AA/AB'
+  baflogr[intersect(hostBBidxs, nminoneidxs), "type"] <- 'BB/AB'
   
   write_tsv(x = baflogr, path = paste0(sampleid, "_genotyped_BAF-Logr_all.txt"), col_names = T)
   
   return(baflogr)
 }
 
+
+
+ascat_run1 <- function(baflogr) { 
+  
+  ## create BAF/logR data ASCAT run 1
+  baflogr <- baflogr[baflogr$type %in% c("AB/AB", "AB/A"), ]
+  # baflogr$chr <- toupper(sub(pattern = "chr", replacement = "", x = baflogr$chr))
+  write.table(x = data.frame(chr = baflogr$chr, pos = baflogr$cumpos, '559T' = baflogr$logr), file = "20180508_559T_tumour_LogR.txt", sep = "\t", row.names = T, quote = F)
+  write.table(x = data.frame(chr = baflogr$chr, pos = baflogr$cumpos, '559N' = 0), file = "20180508_559T_host_LogR.txt", sep = "\t", row.names = T, quote = F)
+  
+  randvect <- sample(x = c(0,1), size = nrow(baflogr), replace = T)
+  write.table(x = data.frame(chr = baflogr$chr, pos = baflogr$cumpos, '559T' = abs(baflogr$baf - randvect)), file = "20180508_559T_tumour_BAF.txt", sep = "\t", row.names = T, quote = F)
+  write.table(x = data.frame(chr = baflogr$chr, pos = baflogr$cumpos, '559N' = abs(baflogr$h_alt/(baflogr$h_ref+baflogr$h_alt) - randvect)), file = "20180508_559T_host_BAF.txt", sep = "\t", row.names = T, quote = F)
+  
+  
+  ### running ascat first time
+  library(ASCAT)
+  ascat.bc <- ascat.loadData("20180508_559T_tumour_LogR.txt", "20180508_559T_tumour_BAF.txt","20180508_559T_host_LogR.txt","20180508_559T_host_BAF.txt")
+  ascat.plotRawData(ascat.bc)
+  
+  ascat.bc <- ascat.aspcf(ascat.bc, penalty = 250)
+  ascat.plotSegmentedData(ascat.bc)
+  ascat.output = ascat.runAscat(ascat.bc, gamma = 1)
+  # View(ascat.output$segments)
+  write.table(x = ascat.output$segments, file = "559T.ASCATprofile.segments.txt", sep = "\t", quote = F, row.names = F)
+
+  return(ascat.output)
+}
+
+
+ascat_run2 <- function(baflogr, ascatoutput1) {
+  
+  psi <- ascatoutput1$psi
+  rho <- ascatoutput1$aberrantcellfraction
+  
+  baflogr <- baflogr[!is.na(baflogr$type), ]
+  # baflogr$chr <- toupper(sub(pattern = "chr", replacement = "", x = baflogr$chr))
+  # baflogr_run2$baf <- ifelse(baflogr_run2$type %in% c("AA/AB", "BB/AB"), (baflogr_run2$nb*rho + (1-rho))/(2*(1-rho) + rho*baflogr_run2$ntot), baflogr_run2$baf)
+  # recalibrate BAF for tumour het, host hom SNPs:
+  baflogr$baf <- ifelse(baflogr$type %in% c("AA/AB"), (psi*2^baflogr$logr*baflogr$baf+(1-rho))/(psi*2^baflogr$logr),
+                        ifelse(baflogr$type %in% c("BB/AB"), (psi*2^baflogr$logr*baflogr$baf-1*(1-rho))/(psi*2^baflogr$logr),
+                               baflogr$baf))
+  baflogr$normalbaf <- ifelse(baflogr$type %in% c("AA/AB", "BB/AB"), .5, baflogr$h_alt/(baflogr$h_ref+baflogr$h_alt))
+  
+  ### write BAF/logR data ASCAT run 2
+  write.table(x = data.frame(chr = baflogr$chr, pos = baflogr$cumpos, '559T' = baflogr$logr), file = "20180508_559T_tumour_LogR.txt", sep = "\t", row.names = T, quote = F)
+  write.table(x = data.frame(chr = baflogr$chr, pos = baflogr$cumpos, '559N' = 0), file = "20180508_559T_host_LogR.txt", sep = "\t", row.names = T, quote = F)
+  
+  randvect <- sample(x = c(0,1), size = nrow(baflogr), replace = T)
+  write.table(x = data.frame(chr = baflogr$chr, pos = baflogr$cumpos, '559T' = abs(baflogr$baf - randvect)), file = "20180508_559T_tumour_BAF.txt", sep = "\t", row.names = T, quote = F)
+  write.table(x = data.frame(chr = baflogr$chr, pos = baflogr$cumpos, '559N' = abs(baflogr$normalbaf - randvect)), file = "20180508_559T_host_BAF.txt", sep = "\t", row.names = T, quote = F)
+  
+  
+  ### running ascat
+  ascat.bc <- ascat.loadData("20180508_559T_tumour_LogR.txt", "20180508_559T_tumour_BAF.txt","20180508_559T_host_LogR.txt","20180508_559T_host_BAF.txt")
+  ascat.plotRawData(ascat.bc)
+  
+  ascat.bc <- ascat.aspcf(ascat.bc, penalty = 250)
+  ascat.plotSegmentedData(ascat.bc)
+  ascat.output = ascat.runAscat(ascat.bc, gamma = 1)
+  # View(ascat.output$segments)
+  write.table(x = ascat.output$segments, file = "559T.ASCATprofile.segments.txt", sep = "\t", quote = F, row.names = F)
+  
+  return(ascat.output)
+}
