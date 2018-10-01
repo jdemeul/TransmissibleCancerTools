@@ -11,7 +11,7 @@ get_devil_genome <- function(devilinfofile) {
 }
 
 
-get_baf_logr <- function(tumour_allelecounts_file, host_allelecounts_file, reference_alleles_file, genomeinfo, min_contig_size = 1e6, min_depth = 10) {
+get_baf_logr <- function(tumour_allelecounts_file, host_allelecounts_file, reference_alleles_file, genomeinfo, min_contig_size = 1e6) {
   
   reference_alleles <- readr::read_tsv(file = reference_alleles_file, col_names = c("scaffold", "pos", "ref", "alt"), col_types = "cicc-", skip = 1)
   
@@ -35,14 +35,12 @@ get_baf_logr <- function(tumour_allelecounts_file, host_allelecounts_file, refer
                           ifelse(reference_alleles$alt == "C", tumour_allelecounts$count_C, 
                                  ifelse(reference_alleles$alt == "G", tumour_allelecounts$count_G, tumour_allelecounts$count_T)))
   
-  # some filtering on minimal depth and unreliable contigs
+  # some filtering on unreliable contigs
   allowed_contigs <- mcols(genomeinfo)[width(genomeinfo) >= min_contig_size, "contig"]
-  # require at least one read in the tumour and mindepth in normal
-  has_good_depth <- (baflogr$h_ref + baflogr$h_alt >= min_depth) & (baflogr$t_ref + baflogr$t_alt >= 1)
+  # # require at least one read in the tumour and mindepth in normal
+  # has_good_depth <- (baflogr$h_ref + baflogr$h_alt >= min_depth) & (baflogr$t_ref + baflogr$t_alt >= 1)
+  baflogr <- baflogr[which(baflogr$scaffold %in% allowed_contigs), ]
   
-  # on_sel_chrom <- dft2_dna$chr == "Chr4"
-  
-  baflogr <- baflogr[has_good_depth & baflogr$scaffold %in% allowed_contigs, ]
   # dft2_dna <- dft2_dna[has_good_depth & dft2_dna$X.CHR %in% allowed_contigs, ]
   # fibro_dna <- fibro_dna[has_good_depth & fibro_dna$X.CHR %in% allowed_contigs, ]
   
@@ -59,15 +57,15 @@ get_baf_logr <- function(tumour_allelecounts_file, host_allelecounts_file, refer
 check_rho_psi_estimates <- function(sampleid, baflogr, rho = .5, psit = 1.85) {
   baflogr$ntot <- ((2*(1-rho) + rho*psit)*2^baflogr$logr - 2*(1-rho))/rho
   # p1 <- ggplot(data = baflogr[sample(x = 1:nrow(baflogr), size = 1e6, replace = F), ], mapping = aes(x = cumpos, y = ntot)) + geom_point(shape = ".", alpha = .2) + facet_wrap(~chr) + ylim(c(-.2, 6))
-  p1 <- ggplot(data = baflogr, mapping = aes(x = cumpos, y = ntot)) + geom_point(shape = ".", alpha = .2) + facet_wrap(~chr) + ylim(c(-.2, 6))
+  p1 <- ggplot(data = baflogr, mapping = aes(x = cumpos, y = ntot)) + geom_point(shape = ".", alpha = .2) + facet_wrap(~chr) + ylim(c(-.2, 6)) + theme_minimal()
   # p1 <- ggplot(data = baflogr, mapping = aes(x = cumpos, y = ntot)) + geom_point(shape = ".", alpha = .2) + facet_wrap(~chr) + ylim(c(-.2, 6))
   ggsave(filename = paste0(sampleid, "_initialRhoPsiT_totalCNplot.png"), plot = p1)
-  return(p1)
+  return(NULL)
 }
 
 
 
-genotype_loci <- function(baflogr, rho = .5, psit = 2.1) {
+genotype_loci <- function(baflogr, rho = .5, psit = 2.1, sampleid, species = "devil", min_depth = 10, plotting = T) {
   
   ## Reasoning host loci:
   # host = hom if ref == 0 | alt== 0 (coverage normal ≥ 10, imposed in previous step mindepth)
@@ -81,9 +79,10 @@ genotype_loci <- function(baflogr, rho = .5, psit = 2.1) {
   #                          ifelse(baflogr$h_alt  == 0 & baflogr$t_alt >= 3, "AA/B*", # host hom ref, alt reads tumour must come from cancer
   #                                 ifelse(baflogr$h_ref >= 3 & baflogr$h_alt >= 3 & ( hostbaf >= .25 | hostbaf <= .75 ), "AB/*", NA)))
   
-  baflogr$htgeno <- ifelse(baflogr$h_ref == 0 | hostbaf >= .95, ifelse(baflogr$t_ref >= 3, "BB/A*", "BB/*"), # host hom alt, ref reads tumour must come from cancer 
+  baflogr$htgeno <- ifelse(baflogr$h_ref + baflogr$h_alt < min_depth, "*/*", # can we make a proper call, i.e. do we have enough coverage in the normal?
+                           ifelse(baflogr$h_ref == 0 | hostbaf >= .95, ifelse(baflogr$t_ref >= 3, "BB/A*", "BB/*"), # host hom alt, ref reads tumour must come from cancer 
                            ifelse(baflogr$h_alt == 0 | hostbaf <= .05, ifelse(baflogr$t_alt >= 3, "AA/B*", "AA/*"), # host hom ref, alt reads tumour must come from cancer
-                                  ifelse(baflogr$h_ref >= 3 & baflogr$h_alt >= 3 & ( hostbaf >= .25 | hostbaf <= .75 ), "AB/*", "*/*"))) #BB
+                                  ifelse(baflogr$h_ref >= 3 & baflogr$h_alt >= 3 & ( hostbaf >= .25 | hostbaf <= .75 ), "AB/*", "*/*")))) #BB
   
   ### omit loci where host genotype can not clearly be assigned?
   # baflogr <- baflogr[!is.na(baflogr$htgeno), ]
@@ -101,37 +100,112 @@ genotype_loci <- function(baflogr, rho = .5, psit = 2.1) {
                               ifelse(baflogr$htgeno %in% c("BB/A*", "BB/*"), ((2*(1-rho) + rho*psit)*baflogr$baf*2^baflogr$logr - 2*(1-rho))/rho, NA))) # two copies of B in host
   
   # get CN minor allele
-  baflogr$nmin <- ifelse(baflogr$na <= baflogr$nb, baflogr$na, baflogr$nb)
+  baflogr$nmin <- ifelse(baflogr$na < baflogr$nb, baflogr$na, baflogr$nb)
+  # and total
+  baflogr$ntot <- (psit*2^baflogr$logr-2*(1-rho))/rho
   
   ## smooth minor and total CN
   # total CN should be stable, so running median
-  baflogr$ntotsm <- unlist(by(data = baflogr$ntot, INDICES = baflogr$chr, FUN = function(x) runmed(x = x, k = 251, endrule = "constant")))
+  # the data needs to be sorted chr-pos-wise for this and NA's need to be skipped
+  notna_idxs <- which(!is.na(baflogr$na))
+  baflogr$ntotsm <- NA
+  baflogr$nminsm <- NA
+  baflogr$ntotsm[notna_idxs] <- unlist(by(data = baflogr$ntot[notna_idxs], INDICES = baflogr$chr[notna_idxs], FUN = function(x) runmed(x = x, k = 251, endrule = "constant")))
   # minor will oscillate between two states for any segment, reflecting hom/het SNPs, so use running mean to deect where truly zero, i.e. tumour LOH
-  baflogr$nminsm <- unlist(by(data = baflogr$nmin, INDICES = baflogr$chr, FUN = function(x) as.numeric(runmean(x = Rle(x), k = 1001, endrule = "constant"))))
+  baflogr$nminsm[notna_idxs] <- unlist(by(data = baflogr$nmin[notna_idxs], INDICES = baflogr$chr[notna_idxs], FUN = function(x) as.numeric(runmean(x = Rle(x), k = 1001, endrule = "constant"))))
+  
+  if (plotting) {
+    # checking
+    # testdf <- baflogr[sample(x = 1:nrow(baflogr), size = 100000, replace = F), ]
+    # p1 <- ggplot(data = baflogr[baflogr$chr == "19",], mapping = aes(x = cumpos)) + geom_point(shape = ".", alpha = 1, mapping = aes(y = ntot), colour = "goldenrod2")
+    p1 <- ggplot(data = baflogr, mapping = aes(x = cumpos)) + geom_point(shape = ".", alpha = .2, mapping = aes(y = ntot), colour = "goldenrod2")
+    p1 <- p1 + geom_point(shape = ".", alpha = .2, mapping = aes(y = nmin), colour = "darkslategrey")
+    p1 <- p1 + geom_path(mapping = aes(y = nminsm), colour = "red", alpha = .5)
+    p1 <- p1 + geom_path(mapping = aes(y = ntotsm), colour = "black", alpha = .5)
+    p1 <- p1 + facet_wrap(~chr)
+    p1 <- p1 + ylim(c(-.2, 6)) + theme_minimal()
+    ggsave(filename = paste0(sampleid, "_nmin-ntot-LOH_plot.png"), plot = p1)
+    # p1 <- p1 + xlim(c(7.25e7,7.5e7))
+    # p1 <- p1+ylim(c(0, 1))
+    
+    # ggsave(filename = "/srv/shared/vanloo/home/jdemeul/projects/2018_Murchison/results/20180426_CN-transformed_BAFLogR.png", plot = p1, width = 16, height = 6)
+    
+    # plot(1:length(cnsegs$Chr2$yhat), cnsegs$Chr2$yhat)
+    
+    # p1 <- ggplot(data = baflogr, mapping = aes(x = ntotsm, fill = htgeno)) + geom_histogram(binwidth = .01)
+    
+    p1 <- ggplot(data = baflogr, mapping = aes(x = nmin, fill = htgeno)) + geom_histogram(binwidth = .01)
+    # p1 <- p1 + geom_vline(xintercept = .1)
+    p1 <- p1 + facet_wrap(~chr)
+    p1 <- p1 + lims(x = c(-.2, 5), y = c(0, 5000)) + theme_minimal()
+    ggsave(filename = paste0(sampleid, "_nmin-histogram-genotypes.png"), plot = p1)
+  }
+  
+  return(baflogr)
+}
+
+
+genotype_loci_2ndpass <- function(baflogr, sampleid,
+                                  ntotonepeak = 1, ntotoneerr = 1/3, cnoneseg_minsnps = 100,
+                                  nminzeropeak = 0, nminonepeak = 1, nminzeroerr = 1/100, nminzeroseg_minsnps = 1000, 
+                                  plotting = T) {
+  
+  # find LOH based on total CN = 1 regions in tumour
+  # NAs should be scattered about, only where low coverage in normal, no long stretches, so safe to set them as T
+  cnonesegs <- by(data = baflogr$ntotsm, INDICES = baflogr$chr, FUN = function(x) as(object = (x <= ntotonepeak + ntotoneerr | is.na(x)), "Rle"))
+  cnonesegs <- as(object = unlist(lapply(cnonesegs, FUN = function(x) { runValue(x)[runLength(x) < cnoneseg_minsnps] <- F; return(as.vector(x))})), "Rle")
+  
+  segstarts <- start(cnonesegs)[runValue(cnonesegs)]
+  segends <- end(cnonesegs)[runValue(cnonesegs)]
+  
+  # find LOH based on minor CN = 0 regions in tumour
+  nminzerosegs <- by(data = baflogr$nminsm, INDICES = baflogr$chr, FUN = function(x) as(object = (abs(x) <= nminzeropeak + nminzeroerr | is.na(x)), "Rle"))
+  nminzerosegs <- as(object = unlist(lapply(nminzerosegs, FUN = function(x) { runValue(x)[runLength(x) < nminzeroseg_minsnps] <- F; return(as.vector(x))})), "Rle")
+  
+  segstarts2 <- start(nminzerosegs)[runValue(nminzerosegs)]
+  segends2 <- end(nminzerosegs)[runValue(nminzerosegs)]
+  
+  if (plotting) {
+    p1 <- ggplot(data = baflogr, mapping = aes(x = 1:nrow(baflogr))) + geom_point(shape = ".", alpha = .2, mapping = aes(y = ntot), colour = "goldenrod2")
+    p1 <- p1 + geom_point(shape = ".", alpha = .2, mapping = aes(y = nmin), colour = "darkslategrey")
+    p1 <- p1 + geom_segment(data = data.frame(segstarts2, segends2), mapping = aes(x = segstarts2, xend = segends2, y = 0, yend = 0), colour = "red", size = 5, alpha = .75)
+    p1 <- p1 + geom_segment(data = data.frame(segstarts, segends), mapping = aes(x = segstarts, xend = segends, y = 1, yend = 1), colour = "black", size = 5, alpha = .75)
+    p1 <- p1 + ylim(c(-.2, 6)) + theme_minimal()
+    ggsave(filename = paste0(sampleid, "_identifiedLOHsegments.png"), plot = p1)
+  }
+  # ggsave(filename = paste0(sampleid, "_nmin-ntot-LOH_plot.png"), plot = p1)
   
   
-  # checking
-  # testdf <- baflogr[sample(x = 1:nrow(baflogr), size = 100000, replace = F), ]
-  # p1 <- ggplot(data = baflogr[baflogr$chr == "19",], mapping = aes(x = cumpos)) + geom_point(shape = ".", alpha = 1, mapping = aes(y = ntot), colour = "goldenrod2")
-  p1 <- ggplot(data = baflogr, mapping = aes(x = cumpos)) + geom_point(shape = ".", alpha = .2, mapping = aes(y = ntot), colour = "goldenrod2")
-  p1 <- p1 + geom_point(shape = ".", alpha = .2, mapping = aes(y = nmin), colour = "darkslategrey") + geom_point(mapping = aes(y = nminsm), colour = "red", alpha = .5, shape = ".")
-  p1 <- p1 + geom_point(mapping = aes(y = ntotsm), colour = "black", alpha = .5, shape = ".")
-  p1 <- p1 + facet_wrap(~chr)
-  p1 <- p1 + ylim(c(-.2, 6))
-  # p1 <- p1 + xlim(c(7.25e7,7.5e7))
-  # p1 <- p1+ylim(c(0, 1))
+  ### selecting SNPs to run on:
+  # get all hetloci (nmin ≥ 1) which are het in host as well (so htgeno = AB/*)
+  hetidxs <- which(baflogr$htgeno == "AB/*")
+  # nminoneidxs <- which(baflogr$nmin >= (.75*nminonepeak + .25*nminzeropeak)/2)
+  nminoneidxs <- which(baflogr$nmin >= (.66*nminonepeak + .33*nminzeropeak))
+  cnoneidxs <- unlist(mapply(segstarts, segends, FUN = ':'))
+  nminzeroidxs <- unlist(mapply(segstarts2, segends2, FUN = ':'))
+  hostAAidxs <- which(baflogr$htgeno %in% c('AA/B*', 'AA/*'))
+  hostBBidxs <- which(baflogr$htgeno %in% c('BB/A*', 'BB/*'))
   
+  # finalidxs <- intersect(hetidxs, c(nminoneidxs, cnoneidxs, nminzeroidxs))
   
-  # ggsave(filename = "/srv/shared/vanloo/home/jdemeul/projects/2018_Murchison/results/20180426_CN-transformed_BAFLogR.png", plot = p1, width = 16, height = 6)
+  baflogr$type <- NA
+  baflogr[intersect(hetidxs, nminoneidxs), "type"] <- "AB/AB"
+  baflogr[intersect(hetidxs, c(cnoneidxs, nminzeroidxs)), "type"] <- 'AB/A'
+  baflogr[intersect(hostAAidxs, nminoneidxs), "type"] <- 'AA/AB'
+  baflogr[intersect(hostBBidxs, nminoneidxs), "type"] <- 'BB/AB'
   
-  # plot(1:length(cnsegs$Chr2$yhat), cnsegs$Chr2$yhat)
+  # finalbaflogr <- baflogr[finalidxs, ]
+  if (plotting) {
+    # p1 <- ggplot(data = baflogr[baflogr$type %in% c("AB/AB", "AB/A") & baflogr$chr != "Chrx", ], mapping = aes(x = cumpos)) + geom_point(shape = ".", alpha = .2, mapping = aes(y = baf), colour = "goldenrod2")
+    p1 <- ggplot(data = baflogr[baflogr$type %in% c("AB/AB", "AB/A") & baflogr$chr != "X", ], mapping = aes(x = cumpos))
+    p1 <- p1 + geom_point(shape = ".", alpha = .2, mapping = aes(y = baf), colour = "goldenrod2")
+    p1 <- p1 + facet_wrap(~chr)
+    # p1 <- p1+ylim(c(-.2, 6))
+    ggsave(filename = paste0(sampleid, "_BAFinputToASCATrun1.png"), plot = p1)
+    # ggsave(filename = "/srv/shared/vanloo/home/jdemeul/projects/2018_Murchison/results/20180426_input_BAF_first_ASCAT_run.png", plot = p1, width = 16, height = 6)
+  }
   
-  # p1 <- ggplot(data = baflogr, mapping = aes(x = ntotsm, fill = htgeno)) + geom_histogram(binwidth = .01)
-  p1 <- ggplot(data = baflogr[baflogr$htgeno != "AA/*",], mapping = aes(x = nmin, fill = htgeno)) + geom_histogram(binwidth = .01)
-  # p1 <- p1 + geom_vline(xintercept = .1)
-  p1 <- p1 + facet_wrap(~chr)
-  p1 <- p1 + xlim(c(-.2, 5))
-  p1
+  write_tsv(x = baflogr, path = paste0(sampleid, "_genotyped_BAF-Logr_all.txt"), col_names = T)
   
   return(baflogr)
 }
